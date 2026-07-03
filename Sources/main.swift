@@ -118,11 +118,19 @@ private func octaEdges(_ r: Double) -> [(V3, V3)] {
     return pairs.map { (v[$0.0], v[$0.1]) }
 }
 
+// Pauses the render clock whenever nothing can be seen: window fully occluded,
+// screen locked, or displays asleep. A desktop-level window otherwise redraws at
+// 30 fps forever (~1 core, both displays) even under a wall of app windows.
+final class RenderGate: ObservableObject {
+    @Published var paused = false
+}
+
 struct WallpaperView: View {
     var fill: Bool = false
+    @ObservedObject var gate = RenderGate()
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { tl in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: gate.paused)) { tl in
             let t = forcedTime ?? tl.date.timeIntervalSinceReferenceDate
             let u = unlockState(t)
             ZStack {
@@ -413,13 +421,38 @@ private func snapshot(to path: String, width: CGFloat, height: CGFloat, fill: Bo
 // MARK: - App delegate
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var windows: [NSWindow] = []
+    var gates: [(window: NSWindow, gate: RenderGate)] = []
+    var screenLocked = false
+    var screensAsleep = false
+
     func applicationDidFinishLaunching(_ note: Notification) {
         NSApp.setActivationPolicy(.accessory); rebuild()
         NotificationCenter.default.addObserver(self, selector: #selector(rebuild),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(recomputePause),
+            name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        let dnc = DistributedNotificationCenter.default()
+        dnc.addObserver(self, selector: #selector(screenDidLock), name: .init("com.apple.screenIsLocked"), object: nil)
+        dnc.addObserver(self, selector: #selector(screenDidUnlock), name: .init("com.apple.screenIsUnlocked"), object: nil)
+        let wnc = NSWorkspace.shared.notificationCenter
+        wnc.addObserver(self, selector: #selector(screensDidSleep), name: NSWorkspace.screensDidSleepNotification, object: nil)
+        wnc.addObserver(self, selector: #selector(screensDidWake), name: NSWorkspace.screensDidWakeNotification, object: nil)
+    }
+    @objc func screenDidLock() { screenLocked = true; recomputePause() }
+    @objc func screenDidUnlock() { screenLocked = false; recomputePause() }
+    @objc func screensDidSleep() { screensAsleep = true; recomputePause() }
+    @objc func screensDidWake() { screensAsleep = false; recomputePause() }
+
+    // A gate pauses its window's TimelineView when nothing of it can be seen.
+    @objc func recomputePause() {
+        let globallyDark = screenLocked || screensAsleep
+        for (w, g) in gates {
+            let paused = globallyDark || !w.occlusionState.contains(.visible)
+            if g.paused != paused { g.paused = paused }
+        }
     }
     @objc func rebuild() {
-        windows.forEach { $0.orderOut(nil) }; windows.removeAll()
+        windows.forEach { $0.orderOut(nil) }; windows.removeAll(); gates.removeAll()
         for screen in NSScreen.screens {
             let useFill = screen.frame.width / max(screen.frame.height, 1) > imgAspect
             let w = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
@@ -427,10 +460,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
             w.ignoresMouseEvents = true; w.isOpaque = true; w.backgroundColor = .black; w.hasShadow = false
             w.setFrame(screen.frame, display: true)
-            let host = NSHostingView(rootView: WallpaperView(fill: useFill))
+            let gate = RenderGate()
+            let host = NSHostingView(rootView: WallpaperView(fill: useFill, gate: gate))
             host.frame = NSRect(origin: .zero, size: screen.frame.size); host.autoresizingMask = [.width, .height]
-            w.contentView = host; w.orderFrontRegardless(); windows.append(w)
+            w.contentView = host; w.orderFrontRegardless(); windows.append(w); gates.append((w, gate))
         }
+        recomputePause()
     }
 }
 
