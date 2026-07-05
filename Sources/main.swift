@@ -424,6 +424,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var gates: [(window: NSWindow, gate: RenderGate)] = []
     var screenLocked = false
     var screensAsleep = false
+    private let smokeRequested = ProcessInfo.processInfo.environment["BLW_SMOKE"] == "1" ||
+        CommandLine.arguments.contains("--smoke")
 
     func applicationDidFinishLaunching(_ note: Notification) {
         NSApp.setActivationPolicy(.accessory); rebuild()
@@ -437,6 +439,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let wnc = NSWorkspace.shared.notificationCenter
         wnc.addObserver(self, selector: #selector(screensDidSleep), name: NSWorkspace.screensDidSleepNotification, object: nil)
         wnc.addObserver(self, selector: #selector(screensDidWake), name: NSWorkspace.screensDidWakeNotification, object: nil)
+        if smokeRequested {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                self?.printSmokeAndQuit()
+            }
+        }
     }
     @objc func screenDidLock() { screenLocked = true; recomputePause() }
     @objc func screenDidUnlock() { screenLocked = false; recomputePause() }
@@ -466,6 +473,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.contentView = host; w.orderFrontRegardless(); windows.append(w); gates.append((w, gate))
         }
         recomputePause()
+    }
+
+    private func printSmokeAndQuit() {
+        let visible = windows.filter(\.isVisible)
+        let frames = windows.map { "\(Int($0.frame.width))x\(Int($0.frame.height))@\(Int($0.frame.minX)),\(Int($0.frame.minY))" }.joined(separator: ",")
+        let paused = gates.filter { $0.gate.paused }.count
+        let loaded = baseImage != nil
+        let line = "BLW_SMOKE|screens=\(NSScreen.screens.count)|windows=\(windows.count)|visible=\(visible.count)|paused=\(paused)|image_loaded=\(loaded)|frames=\(frames)"
+        if let data = (line + "\n").data(using: .utf8) {
+            FileHandle.standardOutput.write(data)
+        }
+        NSApp.terminate(nil)
     }
 }
 
