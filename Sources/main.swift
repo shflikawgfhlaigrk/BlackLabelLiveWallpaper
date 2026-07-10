@@ -19,7 +19,7 @@ private let deepGlass1  = Color(red: 0.07, green: 0.075, blue: 0.10)
 private let deepGlass2  = Color(red: 0.02, green: 0.025, blue: 0.045)
 
 private let leftApps  = ["LEADS", "REAL ESTATE", "MARKETING"]
-private let rightApps = ["TRADING", "SOVEREIGN", "HOMEFRONT"]
+private let rightApps = ["TRADING", "SOVEREIGN", "VIGIL"]
 
 private func loadBase() -> NSImage? {
     if let u = Bundle.main.url(forResource: "wallpaper", withExtension: "png"),
