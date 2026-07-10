@@ -1,7 +1,15 @@
 #!/bin/bash
-# Reproducible build + install for Black Label Live Wallpaper.
+# Reproducible local build + guarded production install for Black Label Live Wallpaper.
 set -euo pipefail
-SRC="$HOME/BlackLabelLiveWallpaper"
+SRC="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=scripts/production-install-guard.sh
+source "$SRC/scripts/production-install-guard.sh"
+RELEASE_INSTALL="${RELEASE_INSTALL:-0}"
+SIGN_ID="${SIGN_ID:--}"
+if [[ "${INSTALL:-0}" == "1" && "$RELEASE_INSTALL" != "1" ]]; then
+  echo "ABORT: INSTALL=1 cannot install a development build over the production app. Use RELEASE_INSTALL=1 with a Developer ID SIGN_ID." >&2
+  exit 64
+fi
 APP_NAME="Black Label Live Wallpaper"
 EXE="LiveWallpaper"
 BUILD="$SRC/build"
@@ -53,20 +61,24 @@ lipo -create "${ARCH_BINS[@]}" -output "$APP/Contents/MacOS/$EXE"
 rm -f "${ARCH_BINS[@]}"
 echo "    archs: $(lipo -archs "$APP/Contents/MacOS/$EXE")"
 
-codesign --force --deep -s - "$APP"
+codesign --force --deep --options runtime --timestamp -s "$SIGN_ID" "$APP"
 codesign --verify --deep --strict "$APP"
+echo "built: $APP"
 
-DEST="/Applications/$APP_NAME.app"
-STAGE_INSTALL="$DEST.staging.$$"
-OLD="$DEST.old.$$"
-rm -rf "$STAGE_INSTALL" "$OLD"
-cp -R "$APP" "$STAGE_INSTALL"
-test -f "$STAGE_INSTALL/Contents/Info.plist"
-test -f "$STAGE_INSTALL/Contents/MacOS/$EXE"
-test -f "$STAGE_INSTALL/Contents/Resources/wallpaper.png"
-codesign --verify --deep --strict "$STAGE_INSTALL"
-[ -d "$DEST" ] && mv "$DEST" "$OLD"
-mv "$STAGE_INSTALL" "$DEST"
-rm -rf "$OLD"
-codesign --verify --deep --strict "$DEST"
-echo "built + installed atomically: $DEST"
+if [[ "$RELEASE_INSTALL" == "1" ]]; then
+  production_install_guard "$RELEASE_INSTALL" "$APP"
+  DEST="/Applications/$APP_NAME.app"
+  STAGE_INSTALL="$DEST.staging.$$"
+  OLD="$DEST.old.$$"
+  rm -rf "$STAGE_INSTALL" "$OLD"
+  cp -R "$APP" "$STAGE_INSTALL"
+  test -f "$STAGE_INSTALL/Contents/Info.plist"
+  test -f "$STAGE_INSTALL/Contents/MacOS/$EXE"
+  test -f "$STAGE_INSTALL/Contents/Resources/wallpaper.png"
+  codesign --verify --deep --strict "$STAGE_INSTALL"
+  [ -d "$DEST" ] && mv "$DEST" "$OLD"
+  mv "$STAGE_INSTALL" "$DEST"
+  rm -rf "$OLD"
+  codesign --verify --deep --strict "$DEST"
+  echo "installed atomically: $DEST"
+fi
