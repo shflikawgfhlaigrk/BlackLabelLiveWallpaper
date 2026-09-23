@@ -14,9 +14,10 @@ APP_NAME="Black Label Live Wallpaper"
 EXE="LiveWallpaper"
 BUILD="$SRC/build"
 APP="$BUILD/$APP_NAME.app"
-WALLPAPER="$HOME/Pictures/BlackLabelBots_wallpaper_5504x3072.png"
+WALLPAPER="$SRC/assets/wallpaper.png"
+WALLPAPER_SHA256="50a72694b84b348aa146b87a0d1a311a91b16725ade3f607197c00c100440acd"
 MIN_OS="13.0"
-APP_BUILD="2"
+APP_BUILD="3"
 ARCHS=(arm64 x86_64)
 SDK="$(xcrun --sdk macosx --show-sdk-path)"
 
@@ -44,6 +45,11 @@ PLIST
 
 # Bundle the art so the app is self-contained.
 [ -f "$WALLPAPER" ] || { echo "ABORT: missing wallpaper asset at $WALLPAPER"; exit 1; }
+ACTUAL_WALLPAPER_SHA256="$(shasum -a 256 "$WALLPAPER" | awk '{print $1}')"
+[[ "$ACTUAL_WALLPAPER_SHA256" == "$WALLPAPER_SHA256" ]] || {
+  echo "ABORT: wallpaper asset digest mismatch: $ACTUAL_WALLPAPER_SHA256" >&2
+  exit 1
+}
 cp "$WALLPAPER" "$APP/Contents/Resources/wallpaper.png"
 
 echo "==> Compiling Swift (universal2: ${ARCHS[*]})"

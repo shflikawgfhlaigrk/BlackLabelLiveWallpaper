@@ -1,7 +1,8 @@
 # Black Label Live Wallpaper
 
 Native macOS live-wallpaper helper. The app bundle is built reproducibly under this repo's
-`build/` directory.
+`build/` directory. The exact wallpaper input is repo-owned at `assets/wallpaper.png` and
+digest-locked by the build, so a clean checkout does not depend on a developer's Pictures folder.
 
 ## Build and install safety
 

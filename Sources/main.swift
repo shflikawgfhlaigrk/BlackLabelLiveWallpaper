@@ -24,7 +24,7 @@ private let rightApps = ["TRADING", "SOVEREIGN", "VIGIL"]
 private func loadBase() -> NSImage? {
     if let u = Bundle.main.url(forResource: "wallpaper", withExtension: "png"),
        let img = NSImage(contentsOf: u) { return img }
-    return NSImage(contentsOfFile: NSHomeDirectory() + "/Pictures/BlackLabelBots_wallpaper_5504x3072.png")
+    return nil
 }
 private let baseImage: NSImage? = loadBase()
 private let imgAspect: CGFloat = 5504.0 / 3072.0
@@ -36,6 +36,25 @@ private func fitRect(_ size: CGSize, _ fill: Bool) -> Fit {
     let matchWidth = fill ? (scrA >= imgAspect) : (scrA <= imgAspect)
     if matchWidth { let w = size.width, h = w / imgAspect; return Fit(x: 0, y: (size.height - h) / 2, w: w, h: h) }
     else { let h = size.height, w = h * imgAspect; return Fit(x: (size.width - w) / 2, y: 0, w: w, h: h) }
+}
+
+// Fill mode crops the art at the screen edges (fitRect origin goes negative), so
+// overlay chrome anchored in image fractions can land outside the screen. These
+// give the on-screen portion of an image axis as a fraction band, and the shift
+// that keeps a chrome span fully inside it. In fit mode the band is 0...1 and
+// every shift is zero — fit rendering stays pixel-identical.
+private let edgeMargin: CGFloat = 0.012   // chrome clearance from a cropping screen edge
+private func visibleBand(_ origin: CGFloat, _ extent: CGFloat, _ screen: CGFloat) -> ClosedRange<CGFloat> {
+    let e = max(extent, 1)
+    let lo = max(0, -origin / e), hi = min(1, (screen - origin) / e)
+    return lo...max(lo, hi)
+}
+private func slide(_ x0: CGFloat, _ x1: CGFloat, into band: ClosedRange<CGFloat>) -> CGFloat {
+    let lo = band.lowerBound + edgeMargin, hi = band.upperBound - edgeMargin
+    if x1 - x0 >= hi - lo { return (lo + hi - x0 - x1) / 2 }   // span exceeds the band: center it
+    if x0 < lo { return lo - x0 }
+    if x1 > hi { return hi - x1 }
+    return 0
 }
 
 // MARK: - Minimal 3D for holograms (real rotation, projected wireframe)
@@ -135,10 +154,17 @@ struct WallpaperView: View {
             let u = unlockState(t)
             ZStack {
                 Color.black
-                if let img = baseImage {
-                    Image(nsImage: img).resizable().aspectRatio(contentMode: fill ? .fill : .fit)
+                // The art is drawn inside the Canvas, never as a sibling Image view:
+                // a scaledToFill sibling reports the covering size and inflates the
+                // stack, which hands the Canvas an oversized coordinate space and
+                // breaks the visible-band clamp on cropped edges.
+                Canvas { ctx, size in
+                    let f = fitRect(size, fill)
+                    if let img = baseImage {
+                        ctx.draw(Image(nsImage: img), in: CGRect(x: f.x, y: f.y, width: f.w, height: f.h))
+                    }
+                    draw(ctx, size, t, u)
                 }
-                Canvas { ctx, size in draw(ctx, size, t, u) }
             }
             .offset(x: u.sx, y: u.sy)        // vibration only — no breathing (that read as "liquid")
             .clipped()
@@ -209,27 +235,40 @@ struct WallpaperView: View {
         func nrect(_ u0: CGFloat, _ v0: CGFloat, _ u1: CGFloat, _ v1: CGFloat) -> CGRect {
             let a = P(u0, v0), b = P(u1, v1); return CGRect(x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y)
         }
+        // Chrome (badge, glass panels, pill row) must stay fully on screen in fill
+        // mode; art-anchored effects (traces, gears, emblem, tower) stay in image
+        // space and crop with the art.
+        let visU = visibleBand(f.x, f.w, size.width), visV = visibleBand(f.y, f.h, size.height)
+        func clampUV(_ u0: CGFloat, _ v0: CGFloat, _ u1: CGFloat, _ v1: CGFloat)
+            -> (u0: CGFloat, v0: CGFloat, u1: CGFloat, v1: CGFloat) {
+            let du = slide(u0, u1, into: visU), dv = slide(v0, v1, into: visV)
+            return (u0 + du, v0 + dv, u1 + du, v1 + dv)
+        }
         // 1) holographic spinning gears (3D wireframe, matches the holo language)
         holoGears(ctx, P, S, t)
 
         // 2) HOLOGRAMS — real 3D wireframe, truly rotating (the wow)
         holoTower(ctx, center: P(0.842, 0.300), scale: S(0.060), baseR: S(0.235), t: t)   // spinning holo skyscraper
         // holo data globe (top-right) — dark glass panel hides the gibberish, hologram projects inside
-        glassPanel(ctx, nrect(0.702, 0.048, 0.818, 0.188))
-        renderHolo(ctx, center: P(0.760, 0.118), scale: S(0.050), baseR: S(0.090),
+        let gp = clampUV(0.702, 0.048, 0.818, 0.188)
+        glassPanel(ctx, nrect(gp.u0, gp.v0, gp.u1, gp.v1))
+        renderHolo(ctx, center: P((gp.u0 + gp.u1) / 2, (gp.v0 + gp.v1) / 2), scale: S(0.050), baseR: S(0.090),
                    angle: t * 0.6, tilt: 0.42, yOffset: 0, lw: max(0.9, S(0.0016)),
                    suppress: false, edges: sphereEdges(1.0, 5, 8, 16), t: t)
         // holo crystal (left)
-        glassPanel(ctx, nrect(0.044, 0.668, 0.182, 0.808))
-        renderHolo(ctx, center: P(0.113, 0.738), scale: S(0.052), baseR: S(0.090),
+        let cp = clampUV(0.044, 0.668, 0.182, 0.808)
+        glassPanel(ctx, nrect(cp.u0, cp.v0, cp.u1, cp.v1))
+        renderHolo(ctx, center: P((cp.u0 + cp.u1) / 2, (cp.v0 + cp.v1) / 2), scale: S(0.052), baseR: S(0.090),
                    angle: t * 0.7, tilt: 0.5, yOffset: 0, lw: max(0.9, S(0.0016)),
                    suppress: false, edges: octaEdges(1.0), t: t)
 
-        // 3) badge stays a clean glass readout
-        let badge = nrect(0.182, 0.045, 0.310, 0.168)
+        // 3) badge — decorative brand monogram only. Constraint: no static number
+        // styled as a live readout may ship on screen (it reads as fabricated data).
+        let bd = clampUV(0.182, 0.045, 0.310, 0.168)
+        let badge = nrect(bd.u0, bd.v0, bd.u1, bd.v1)
         glassPanel(ctx, badge)
-        emboss(ctx, "98", CGPoint(x: badge.midX, y: badge.minY + badge.height * 0.40), badge.height * 0.46, .heavy)
-        emboss(ctx, "GROWTH SCORE", CGPoint(x: badge.midX, y: badge.minY + badge.height * 0.74), badge.height * 0.15, .semibold, tracking: badge.height * 0.012)
+        emboss(ctx, "BL", CGPoint(x: badge.midX, y: badge.minY + badge.height * 0.40), badge.height * 0.46, .heavy)
+        emboss(ctx, "BLACK LABEL", CGPoint(x: badge.midX, y: badge.minY + badge.height * 0.74), badge.height * 0.15, .semibold, tracking: badge.height * 0.012)
 
         // 3) emblem energy core (charges before unlock)
         let gc = P(0.5, 0.33)
@@ -266,7 +305,7 @@ struct WallpaperView: View {
         }
 
         // 6) clean 6-app row (real words + Homefront), embossed
-        drawPills(ctx, f)
+        drawPills(ctx, f, visU, visV)
 
         // 7) unlock shockwave bloom
         if u.burst >= 0 {
@@ -367,17 +406,21 @@ struct WallpaperView: View {
     }
 
     // MARK: bottom pill row
-    private func drawPills(_ ctx: GraphicsContext, _ f: Fit) {
+    private func drawPills(_ ctx: GraphicsContext, _ f: Fit, _ visU: ClosedRange<CGFloat>, _ visV: ClosedRange<CGFloat>) {
         func P(_ u: CGFloat, _ v: CGFloat) -> CGPoint { CGPoint(x: f.x + u * f.w, y: f.y + v * f.h) }
-        let vCenter: CGFloat = 0.887, pillH = f.h * 0.040
-        for (u0, u1) in [(0.030, 0.375), (0.625, 0.970)] {
-            let a = P(CGFloat(u0), vCenter - 0.030), b = P(CGFloat(u1), vCenter + 0.030)
+        let pillH = f.h * 0.040
+        let vCenter = 0.887 + slide(0.857, 0.917, into: visV)   // row must clear a cropping bottom edge
+        let sides: [(bg: (CGFloat, CGFloat), text: (CGFloat, CGFloat), names: [String])] = [
+            (bg: (0.030, 0.375), text: (0.045, 0.370), names: leftApps),
+            (bg: (0.625, 0.970), text: (0.630, 0.955), names: rightApps)]
+        for s in sides {
+            let du = slide(s.bg.0, s.bg.1, into: visU)
+            let a = P(s.bg.0 + du, vCenter - 0.030), b = P(s.bg.1 + du, vCenter + 0.030)
             ctx.fill(Path(roundedRect: CGRect(x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y), cornerRadius: pillH * 0.4),
                      with: .linearGradient(Gradient(colors: [deepGlass1, deepGlass2]),
                                            startPoint: CGPoint(x: a.x, y: a.y), endPoint: CGPoint(x: a.x, y: b.y)))
+            layoutPills(ctx, s.names, s.text.0 + du, s.text.1 + du, vCenter, pillH, f)
         }
-        layoutPills(ctx, leftApps, 0.045, 0.370, vCenter, pillH, f)
-        layoutPills(ctx, rightApps, 0.630, 0.955, vCenter, pillH, f)
     }
     private func layoutPills(_ ctx: GraphicsContext, _ names: [String], _ u0: CGFloat, _ u1: CGFloat,
                              _ vCenter: CGFloat, _ pillH: CGFloat, _ f: Fit) {
@@ -415,7 +458,10 @@ private func snapshot(to path: String, width: CGFloat, height: CGFloat, fill: Bo
           let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) else {
         FileHandle.standardError.write("snapshot failed\n".data(using: .utf8)!); exit(1)
     }
-    try? png.write(to: URL(fileURLWithPath: path)); print("wrote \(path)")
+    do { try png.write(to: URL(fileURLWithPath: path)) } catch {
+        FileHandle.standardError.write("snapshot write failed: \(error.localizedDescription)\n".data(using: .utf8)!); exit(1)
+    }
+    print("wrote \(path)")   // only after the bytes are on disk — callers gate on this line
 }
 
 // MARK: - App delegate
@@ -424,11 +470,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var gates: [(window: NSWindow, gate: RenderGate)] = []
     var screenLocked = false
     var screensAsleep = false
+    var userPaused = false
+    var statusItem: NSStatusItem?
+    private var pauseMenuItem: NSMenuItem?
+    private var letterboxMenuItem: NSMenuItem?
+    private static let letterboxKey = "BLWLetterbox"
     private let smokeRequested = ProcessInfo.processInfo.environment["BLW_SMOKE"] == "1" ||
         CommandLine.arguments.contains("--smoke")
 
     func applicationDidFinishLaunching(_ note: Notification) {
-        NSApp.setActivationPolicy(.accessory); rebuild()
+        NSApp.setActivationPolicy(.accessory); setupStatusItem(); rebuild()
         NotificationCenter.default.addObserver(self, selector: #selector(rebuild),
             name: NSApplication.didChangeScreenParametersNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(recomputePause),
@@ -450,18 +501,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func screensDidSleep() { screensAsleep = true; recomputePause() }
     @objc func screensDidWake() { screensAsleep = false; recomputePause() }
 
-    // A gate pauses its window's TimelineView when nothing of it can be seen.
+    // The desktop windows ignore mouse events and the app has no Dock icon or
+    // window chrome, so this status item is the only user-visible handle on the
+    // running process — it must always offer Quit.
+    private func setupStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let btn = item.button {
+            btn.image = NSImage(systemSymbolName: "photo.on.rectangle.angled",
+                                accessibilityDescription: "Black Label Live Wallpaper")
+            if btn.image == nil { btn.title = "BL" }
+        }
+        let menu = NSMenu()
+        let pause = NSMenuItem(title: "Pause Animation", action: #selector(togglePause), keyEquivalent: "")
+        pause.target = self; menu.addItem(pause)
+        let letterbox = NSMenuItem(title: "Letterbox (Show Full Art)", action: #selector(toggleLetterbox), keyEquivalent: "")
+        letterbox.target = self
+        letterbox.state = UserDefaults.standard.bool(forKey: Self.letterboxKey) ? .on : .off
+        menu.addItem(letterbox)
+        menu.addItem(.separator())
+        let quit = NSMenuItem(title: "Quit Black Label Live Wallpaper",
+                              action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quit.target = NSApp; menu.addItem(quit)
+        item.menu = menu
+        statusItem = item; pauseMenuItem = pause; letterboxMenuItem = letterbox
+    }
+    @objc func togglePause() {
+        userPaused.toggle()
+        pauseMenuItem?.title = userPaused ? "Resume Animation" : "Pause Animation"
+        recomputePause()
+    }
+    @objc func toggleLetterbox() {
+        let letterbox = !UserDefaults.standard.bool(forKey: Self.letterboxKey)
+        UserDefaults.standard.set(letterbox, forKey: Self.letterboxKey)
+        letterboxMenuItem?.state = letterbox ? .on : .off
+        rebuild()
+    }
+
+    // A gate pauses its window's TimelineView when nothing of it can be seen or
+    // the user paused from the status menu.
     @objc func recomputePause() {
-        let globallyDark = screenLocked || screensAsleep
+        let stopped = screenLocked || screensAsleep || userPaused
         for (w, g) in gates {
-            let paused = globallyDark || !w.occlusionState.contains(.visible)
+            let paused = stopped || !w.occlusionState.contains(.visible)
             if g.paused != paused { g.paused = paused }
         }
     }
     @objc func rebuild() {
         windows.forEach { $0.orderOut(nil) }; windows.removeAll(); gates.removeAll()
+        // Fill by default: fit letterboxes every 16:10 built-in with black bands.
+        // Letterbox remains an explicit status-menu choice; the overlay clamp in
+        // draw() keeps chrome on screen for whichever crop fill produces.
+        let useFill = !UserDefaults.standard.bool(forKey: Self.letterboxKey)
         for screen in NSScreen.screens {
-            let useFill = screen.frame.width / max(screen.frame.height, 1) > imgAspect
             let w = NSWindow(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
             w.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopWindow)))
             w.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
