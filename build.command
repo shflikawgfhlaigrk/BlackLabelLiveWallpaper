@@ -44,6 +44,7 @@ PLIST
 
 # Bundle the art so the app is self-contained.
 [ -f "$WALLPAPER" ] || { echo "ABORT: missing wallpaper asset at $WALLPAPER"; exit 1; }
+"$SRC/scripts/validate-wallpaper-asset.sh" "$WALLPAPER"
 cp "$WALLPAPER" "$APP/Contents/Resources/wallpaper.png"
 
 echo "==> Compiling Swift (universal2: ${ARCHS[*]})"

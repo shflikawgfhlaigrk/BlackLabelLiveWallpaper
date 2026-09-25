@@ -24,7 +24,7 @@ private let rightApps = ["TRADING", "SOVEREIGN", "VIGIL"]
 private func loadBase() -> NSImage? {
     if let u = Bundle.main.url(forResource: "wallpaper", withExtension: "png"),
        let img = NSImage(contentsOf: u) { return img }
-    return NSImage(contentsOfFile: NSHomeDirectory() + "/Pictures/BlackLabelBots_wallpaper_5504x3072.png")
+    return nil
 }
 private let baseImage: NSImage? = loadBase()
 private let imgAspect: CGFloat = 5504.0 / 3072.0
