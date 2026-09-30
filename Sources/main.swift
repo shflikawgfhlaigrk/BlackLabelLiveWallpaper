@@ -19,7 +19,7 @@ private let deepGlass1  = Color(red: 0.07, green: 0.075, blue: 0.10)
 private let deepGlass2  = Color(red: 0.02, green: 0.025, blue: 0.045)
 
 private let leftApps  = ["LEADS", "REAL ESTATE", "MARKETING"]
-private let rightApps = ["TRADING", "SOVEREIGN", "VIGIL"]
+private let rightApps = ["TRADING", "OPERATOR", "VIGIL"]
 
 private func loadBase() -> NSImage? {
     if let u = Bundle.main.url(forResource: "wallpaper", withExtension: "png"),
@@ -410,20 +410,45 @@ struct WallpaperView: View {
         func P(_ u: CGFloat, _ v: CGFloat) -> CGPoint { CGPoint(x: f.x + u * f.w, y: f.y + v * f.h) }
         let pillH = f.h * 0.040
         let vCenter = 0.887 + slide(0.857, 0.917, into: visV)   // row must clear a cropping bottom edge
+        // The artwork contains the center title and stray small lettering at
+        // this height. Cover that entire strip before drawing readable chrome.
+        let bandTop = P(visU.lowerBound, vCenter - 0.030)
+        let bandBottom = P(visU.upperBound, vCenter + 0.030)
+        let band = CGRect(x: bandTop.x, y: bandTop.y,
+                          width: bandBottom.x - bandTop.x, height: bandBottom.y - bandTop.y)
+        ctx.fill(Path(roundedRect: band, cornerRadius: pillH * 0.4),
+                 with: .linearGradient(Gradient(colors: [deepGlass1, deepGlass2]),
+                                       startPoint: CGPoint(x: band.midX, y: band.minY),
+                                       endPoint: CGPoint(x: band.midX, y: band.maxY)))
+        // Fill crops the outer edges and slides these panels inward. Leave enough
+        // space between them for the artwork's center "GLOBAL SYSTEMS" title.
         let sides: [(bg: (CGFloat, CGFloat), text: (CGFloat, CGFloat), names: [String])] = [
-            (bg: (0.030, 0.375), text: (0.045, 0.370), names: leftApps),
-            (bg: (0.625, 0.970), text: (0.630, 0.955), names: rightApps)]
+            (bg: (0.030, 0.335), text: (0.040, 0.325), names: leftApps),
+            (bg: (0.665, 0.970), text: (0.675, 0.960), names: rightApps)]
+        var pillBounds: [ClosedRange<CGFloat>] = []
         for s in sides {
             let du = slide(s.bg.0, s.bg.1, into: visU)
             let a = P(s.bg.0 + du, vCenter - 0.030), b = P(s.bg.1 + du, vCenter + 0.030)
             ctx.fill(Path(roundedRect: CGRect(x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y), cornerRadius: pillH * 0.4),
                      with: .linearGradient(Gradient(colors: [deepGlass1, deepGlass2]),
                                            startPoint: CGPoint(x: a.x, y: a.y), endPoint: CGPoint(x: a.x, y: b.y)))
-            layoutPills(ctx, s.names, s.text.0 + du, s.text.1 + du, vCenter, pillH, f)
+            pillBounds.append(layoutPills(ctx, s.names, s.text.0 + du, s.text.1 + du, vCenter, pillH, f))
+        }
+        let center = P(0.5, vCenter)
+        let freeWidth = max(0, 2 * min(center.x - pillBounds[0].upperBound,
+                                     pillBounds[1].lowerBound - center.x) - pillH * 0.25)
+        // A conservative serif width allowance keeps the title clear of the
+        // product pills on older 4:3 displays without a Canvas text remeasure.
+        let titleSize = min(pillH * 1.08, freeWidth / 9.5)
+        if titleSize >= 11 {
+            let title = Text("GLOBAL SYSTEMS").font(.system(size: titleSize, weight: .semibold, design: .serif))
+            ctx.draw(title.foregroundColor(Color.black.opacity(0.65)),
+                     at: CGPoint(x: center.x, y: center.y + titleSize * 0.045), anchor: .center)
+            ctx.draw(title.foregroundColor(brightGold), at: center, anchor: .center)
         }
     }
     private func layoutPills(_ ctx: GraphicsContext, _ names: [String], _ u0: CGFloat, _ u1: CGFloat,
-                             _ vCenter: CGFloat, _ pillH: CGFloat, _ f: Fit) {
+                             _ vCenter: CGFloat, _ pillH: CGFloat, _ f: Fit) -> ClosedRange<CGFloat> {
         let fontSize = pillH * 0.42, yc = f.y + vCenter * f.h
         let padX = pillH * 0.7, gap = pillH * 0.5
         var widths: [CGFloat] = []
@@ -433,6 +458,7 @@ struct WallpaperView: View {
         }
         let total = widths.reduce(0, +) + gap * CGFloat(names.count - 1)
         var x = (f.x + u0 * f.w + f.x + u1 * f.w) / 2 - total / 2
+        let firstX = x
         for (i, n) in names.enumerated() {
             let rect = CGRect(x: x, y: yc - pillH / 2, width: widths[i], height: pillH)
             let rr = Path(roundedRect: rect, cornerRadius: pillH / 2)
@@ -446,6 +472,7 @@ struct WallpaperView: View {
             emboss(ctx, n, CGPoint(x: rect.midX, y: rect.midY), fontSize, .semibold)
             x += widths[i] + gap
         }
+        return firstX...(x - gap)
     }
 }
 
